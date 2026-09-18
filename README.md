@@ -1,8 +1,8 @@
 # PID Loop Health Assessor — How This Agent Works (A Plain-English Guide)
 
-*A friendly, no-jargon explanation of what this project is, what an "AI agent"
-actually is, and how this agent reads control-system data and tells you whether an
-automatic control loop is healthy — whatever that loop happens to control.*
+*A friendly, no-jargon explanation of what this project is and how this agent reads
+control-system data and tells you whether an automatic control loop is healthy —
+whatever that loop happens to control.*
 
 This guide is written for a **non-technical reader**. You do not need to know
 programming or control theory. Every technical word is explained the first time it
@@ -13,23 +13,22 @@ appears. If you only read one document in this project, read this one.
 ## Table of contents
 
 1. [The 30-second version](#the-30-second-version)
-2. [First, what is an "AI agent"?](#first-what-is-an-ai-agent)
-3. [The everyday analogy: a smart assistant with a playbook](#the-everyday-analogy-a-smart-assistant-with-a-playbook)
-4. [What problem does *this* agent solve?](#what-problem-does-this-agent-solve)
-5. [The three pieces that make up this agent](#the-three-pieces-that-make-up-this-agent)
-6. [How the agent thinks, step by step](#how-the-agent-thinks-step-by-step)
-7. [Built to be general-purpose, not tied to one loop](#built-to-be-general-purpose-not-tied-to-one-loop)
-8. [The key ideas in plain language](#the-key-ideas-in-plain-language)
-9. [The metrics, explained](#the-metrics-explained)
-10. [The tools the agent uses](#the-tools-the-agent-uses)
-11. [How do we know it actually works? Testing with known faults](#how-do-we-know-it-actually-works-testing-with-known-faults)
-12. [How well does it perform? The scorecard so far](#how-well-does-it-perform-the-scorecard-so-far)
-13. [What you get at the end](#what-you-get-at-the-end)
-14. [How you actually use it](#how-you-actually-use-it)
-15. [Why build it this way?](#why-build-it-this-way)
-16. [Honest limitations](#honest-limitations)
-17. [Mini-glossary](#mini-glossary)
-18. [Where to go next](#where-to-go-next)
+2. [The everyday analogy: a smart assistant with a playbook](#the-everyday-analogy-a-smart-assistant-with-a-playbook)
+3. [What problem does *this* agent solve?](#what-problem-does-this-agent-solve)
+4. [The three pieces that make up this agent](#the-three-pieces-that-make-up-this-agent)
+5. [How the agent thinks, step by step](#how-the-agent-thinks-step-by-step)
+6. [Built to be general-purpose, not tied to one loop](#built-to-be-general-purpose-not-tied-to-one-loop)
+7. [The key ideas in plain language](#the-key-ideas-in-plain-language)
+8. [The metrics, explained](#the-metrics-explained)
+9. [The tools the agent uses](#the-tools-the-agent-uses)
+10. [How do we know it actually works? Testing with known faults](#how-do-we-know-it-actually-works-testing-with-known-faults)
+11. [How well does it perform? The scorecard so far](#how-well-does-it-perform-the-scorecard-so-far)
+12. [What you get at the end](#what-you-get-at-the-end)
+13. [How you actually use it](#how-you-actually-use-it)
+14. [Why build it this way?](#why-build-it-this-way)
+15. [Honest limitations](#honest-limitations)
+16. [Mini-glossary](#mini-glossary)
+17. [Where to go next](#where-to-go-next)
 
 ---
 
@@ -47,34 +46,6 @@ valve, a face/bypass damper, or any other PID-controlled loop, and it applies th
 diagnostic method. It does this by pairing a smart AI assistant with a written
 **playbook** and a set of **reliable math tools**, so the answers are consistent and
 reproducible instead of guessed.
-
----
-
-## First, what is an "AI agent"?
-
-You have probably used a chatbot: you type a question, it types an answer. That's a
-**chatbot** — it talks.
-
-An **agent** is a chatbot that can also **do things**. Instead of only answering, it can
-take actions on your behalf to accomplish a goal:
-
-- read files,
-- search through a project,
-- run calculations,
-- create documents and charts,
-- check its own work and fix mistakes.
-
-Think of the difference like this:
-
-| A plain chatbot | An AI agent |
-|---|---|
-| Answers questions with words | Carries out a whole task from start to finish |
-| "Here's how you *could* analyze that data…" | *Actually* opens the data, analyzes it, and hands you the finished report |
-| Waits for your next question | Works through many steps on its own, then reports back |
-
-So an **agent** = an AI that can *plan a task, use tools to carry it out, and keep going
-until it's done*. This project is one such agent, pointed at one broad job: diagnosing
-PID control loops of any kind.
 
 ---
 
