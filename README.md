@@ -1,262 +1,702 @@
-# DESIGO INSIGHT SNMP Agent — A Plain-English Guide
+# PID Loop Health Assessor — How This Agent Works (A Plain-English Guide)
 
-*A friendly, no-jargon explanation of what the DESIGO INSIGHT SNMP Agent is, why it
-exists, and how it lets ordinary network-monitoring tools "see" the alarms and logs
-coming out of a Siemens building-management system.*
+*A friendly, no-jargon explanation of what this project is, what an "AI agent"
+actually is, and how this agent reads control-system data and tells you whether an
+automatic control loop is healthy — whatever that loop happens to control.*
 
-This guide is written for a **non-technical reader**. You do not need to know networking,
-building automation, or programming. Every technical term is explained the first time it
-appears. If you only read one document about this project, read this one.
-
-> **Provenance.** This README summarises the design concept described in the Ascentiv AG
-> document *"Concept — DESIGO INSIGHT SNMP Agent"*, version 0.3 (25 November 2010, author
-> Claudio Imoberdorf). It describes an **intended design**, not shipped product
-> documentation.
+This guide is written for a **non-technical reader**. You do not need to know
+programming or control theory. Every technical word is explained the first time it
+appears. If you only read one document in this project, read this one.
 
 ---
 
 ## Table of contents
 
 1. [The 30-second version](#the-30-second-version)
-2. [First, what is SNMP (and a MIB, and an "agent")?](#first-what-is-snmp-and-a-mib-and-an-agent)
-3. [What problem does this solve?](#what-problem-does-this-solve)
-4. [How it all fits together](#how-it-all-fits-together)
-5. [What the agent exposes — the MIB](#what-the-agent-exposes--the-mib)
-6. [Alarms, in plain language](#alarms-in-plain-language)
-7. [Logs, in plain language](#logs-in-plain-language)
-8. [Health, security, and reliability](#health-security-and-reliability)
-9. [What you need to run it](#what-you-need-to-run-it)
-10. [Mini-glossary](#mini-glossary)
-11. [Status and limitations](#status-and-limitations)
+2. [First, what is an "AI agent"?](#first-what-is-an-ai-agent)
+3. [The everyday analogy: a smart assistant with a playbook](#the-everyday-analogy-a-smart-assistant-with-a-playbook)
+4. [What problem does *this* agent solve?](#what-problem-does-this-agent-solve)
+5. [The three pieces that make up this agent](#the-three-pieces-that-make-up-this-agent)
+6. [How the agent thinks, step by step](#how-the-agent-thinks-step-by-step)
+7. [Built to be general-purpose, not tied to one loop](#built-to-be-general-purpose-not-tied-to-one-loop)
+8. [The key ideas in plain language](#the-key-ideas-in-plain-language)
+9. [The metrics, explained](#the-metrics-explained)
+10. [The tools the agent uses](#the-tools-the-agent-uses)
+11. [How do we know it actually works? Testing with known faults](#how-do-we-know-it-actually-works-testing-with-known-faults)
+12. [How well does it perform? The scorecard so far](#how-well-does-it-perform-the-scorecard-so-far)
+13. [What you get at the end](#what-you-get-at-the-end)
+14. [How you actually use it](#how-you-actually-use-it)
+15. [Why build it this way?](#why-build-it-this-way)
+16. [Honest limitations](#honest-limitations)
+17. [Mini-glossary](#mini-glossary)
+18. [Where to go next](#where-to-go-next)
 
 ---
 
 ## The 30-second version
 
-A large building is run by a **building-management system (BMS)** — here, Siemens
-**DESIGO INSIGHT** — which watches thousands of points (temperatures, fans, doors, pumps)
-and raises **alarms** and keeps **logs** when something happens.
+Big buildings (and factories, and ships, and breweries) run on automatic controllers
+that hold something steady — a temperature, a pressure, a flow. Sometimes a controller
+misbehaves: it overshoots, hunts back and forth, or gets "stuck." This project is a
+**general-purpose AI assistant that reads a controller's recorded data and diagnoses
+what's wrong**, the same way an experienced technician would by eyeballing a chart —
+except it does it automatically, explains its reasoning, and produces a tidy report.
 
-Big organisations already run **network-monitoring tools** (the same kind that watch
-servers, routers, and printers) in a central operations room. Those tools speak a common
-language called **SNMP**.
-
-The **DESIGO INSIGHT SNMP Agent** is a small piece of software that acts as a
-**translator**: it takes the building system's alarms and logs and presents them in SNMP,
-so the central monitoring room can watch the building **alongside everything else**, and
-get an automatic alert the moment an alarm changes — without anyone logging into the
-building system.
-
----
-
-## First, what is SNMP (and a MIB, and an "agent")?
-
-Three terms unlock everything else. Here they are in everyday language.
-
-- **SNMP (Simple Network Management Protocol)** — a *common language* that monitoring
-  tools use to ask devices "how are you doing?" and to receive "something just happened!"
-  messages. If you've ever seen a dashboard that shows every server and switch in a
-  company as a green or red dot, SNMP is usually what feeds it.
-
-- **Agent** — the piece of software *on the thing being watched* that answers those SNMP
-  questions. A printer has an SNMP agent; a server has one. This project is an SNMP agent
-  **for a building-management system**. Think of it as a **receptionist** who speaks SNMP
-  on behalf of DESIGO INSIGHT.
-
-- **MIB (Management Information Base)** — the *menu* of everything you're allowed to ask
-  the agent, written in a standard, hierarchical form. When a monitoring tool wants to
-  know "how many high-priority alarms are active?", the MIB is what tells it that such a
-  question exists and where to find the answer.
-
-- **Trap** — an SNMP **push notification**. Instead of the monitoring tool constantly
-  asking "anything new? anything new?", the agent **phones home** the instant something
-  changes. Traps are how you get an alert in seconds rather than minutes.
-
-So, in one sentence: *this project is a receptionist (agent) that publishes a menu (MIB)
-of a building system's alarms and logs in a common language (SNMP), and rings a bell
-(trap) when something changes.*
+It is **not tied to any one kind of loop.** Point it at an economizer, a chilled-water
+valve, a face/bypass damper, or any other PID-controlled loop, and it applies the same
+diagnostic method. It does this by pairing a smart AI assistant with a written
+**playbook** and a set of **reliable math tools**, so the answers are consistent and
+reproducible instead of guessed.
 
 ---
 
-## What problem does this solve?
+## First, what is an "AI agent"?
 
-DESIGO INSIGHT has its own screens and its own way of showing alarms and logs. That's
-fine if someone is sitting in front of it — but large sites want **one** central place
-that watches **everything**: IT systems, network gear, *and* the building.
+You have probably used a chatbot: you type a question, it types an answer. That's a
+**chatbot** — it talks.
 
-Without this agent, the building system is an island: to see its alarms you must open its
-own software. With this agent:
+An **agent** is a chatbot that can also **do things**. Instead of only answering, it can
+take actions on your behalf to accomplish a goal:
 
-- the building's **live alarms** show up in the same monitoring dashboard as everything
-  else;
-- the operations room gets an **automatic alert** (a trap) the moment an alarm appears or
-  clears, or when the overall alarm counts change;
-- the building's **log history** can be queried through the same standard tooling;
-- the monitoring room can even check **"is the building link healthy?"** with a single
-  standard query.
+- read files,
+- search through a project,
+- run calculations,
+- create documents and charts,
+- check its own work and fix mistakes.
 
-In short, it turns a specialist building system into just another well-behaved device on
-the corporate monitoring map.
+Think of the difference like this:
+
+| A plain chatbot | An AI agent |
+|---|---|
+| Answers questions with words | Carries out a whole task from start to finish |
+| "Here's how you *could* analyze that data…" | *Actually* opens the data, analyzes it, and hands you the finished report |
+| Waits for your next question | Works through many steps on its own, then reports back |
+
+So an **agent** = an AI that can *plan a task, use tools to carry it out, and keep going
+until it's done*. This project is one such agent, pointed at one broad job: diagnosing
+PID control loops of any kind.
 
 ---
 
-## How it all fits together
+## The everyday analogy: a smart assistant with a playbook
 
-The agent doesn't talk to DESIGO INSIGHT directly. It goes through a documented service
-layer called **SODIAPI** (the *Service-Oriented DESIGO INSIGHT API*), which is the
-supported, service-style doorway into DESIGO INSIGHT.
+Imagine you hire a brilliant new assistant. They're clever and a fast learner, but on
+day one they don't know **your** company's specific procedures.
+
+So you give them three things:
+
+1. **A job description** — "You are a controls-diagnostics specialist who assesses PID
+   loops."
+2. **A step-by-step playbook** — "Here's exactly how we analyze this kind of data,
+   which measurements to take, and what each warning sign means."
+3. **A calculator and a set of trusted tools** — "Don't do the arithmetic in your head;
+   use these tested tools so the numbers are always right."
+
+That is *precisely* how this project is built:
+
+- The **job description** is the *agent* file.
+- The **playbook** is the *skill*.
+- The **trusted tools** are the *Python programs* (Python is just a popular programming
+  language; think of these as reliable, pre-built calculators).
+
+The AI supplies the intelligence and judgment; the playbook and tools supply the
+consistency and accuracy. Together they behave like a seasoned expert who never skips a
+step.
+
+---
+
+## What problem does *this* agent solve?
+
+Automatic systems hold a value steady using a device called a **PID controller**. You
+don't need the acronym — just picture the **cruise control in a car**. Cruise control
+constantly nudges the accelerator to hold your chosen speed: ease off going downhill,
+press harder going uphill. A PID controller does the same for a process, nudging a
+valve, a damper, a pump, or a heater to hold a **target** value.
+
+The thing being held steady can be almost anything — a room's temperature, the air
+coming off a cooling coil, a duct pressure, a water flow. **This agent doesn't care
+which**; the tell-tale signs of a badly behaving loop look the same across all of them.
+
+When cruise control is tuned badly, you feel it: the car surges and slows, surges and
+slows. Controllers have the same failure modes, and they waste energy, wear out
+equipment, and make conditions uncomfortable or unstable. Common problems this agent
+looks for — in *any* loop:
+
+- **Hunting / oscillation** — the controller constantly overshoots and corrects, like a
+  car that keeps speeding up and slowing down instead of holding steady.
+- **Saturation (stuck at a limit)** — the controller is pushing as hard as it possibly
+  can (fully open or fully closed) and *still* can't reach the target, so it sits pinned
+  at that limit.
+- **Integral windup** — the controller "over-commits" while it's maxed out, then
+  overshoots dramatically when conditions finally change. (There is a detailed,
+  friendly integral-windup walkthrough in the full project repository.)
+- **Too aggressive (P too high)** — it reacts so hard to small changes that it creates
+  fast, jittery back-and-forth motion.
+- **Handoff chatter** — in loops where one signal drives *two* devices in sequence (like
+  a face damper and a bypass damper), both can end up fidgeting at the crossover point.
+
+The agent reads the building's own recorded data and figures out **which** of these is
+happening, **when**, and **how often** — then writes it up in plain English.
+
+### The twist that makes this hard
+
+Normally, to judge a controller you compare two things: the **target** value and the
+**actual** value. But in real exports the target is **often missing** — it simply wasn't
+recorded. It's like being asked "was the driver holding their speed well?" when you can
+only see how the car moved — not what speed they were *aiming* for.
+
+So the agent's core skill is judging health purely from the **shape** of the wiggles in
+the data — exactly the way a veteran technician can glance at a chart and say "that's
+overshooting" without needing the target line. This shape-based method is what makes the
+agent **general-purpose**: it works on any loop, with or without a recorded target.
+Teaching an AI to do that reliably is the clever part.
+
+---
+
+## The three pieces that make up this agent
 
 ```mermaid
 flowchart LR
-    MON["Monitoring tool<br/>(SNMP manager)"] -- "SNMP v3 (queries + traps)" --> AGENT
-    AGENT["DESIGO INSIGHT<br/>SNMP Agent<br/>(Windows service)"] -- "WCF calls" --> SODIAPI
-    SODIAPI["SODIAPI<br/>(WCF services, hosted in IIS)"] -- "DI services" --> DI["DESIGO INSIGHT<br/>(building-management system)"]
+    A["1 · The AGENT file<br/>(the job description /<br/>who the assistant is)"] --> B["2 · The SKILL<br/>(the step-by-step playbook)"]
+    B --> C["3 · The PYTHON TOOLS<br/>(trusted calculators<br/>that crunch the numbers)"]
+    C --> D["Finished report,<br/>charts &amp; plain-English verdict"]
 ```
 
-A few key facts about this arrangement:
+**1. The agent file** — a short document that tells the AI *who to be*: "You are an
+HVAC (heating, ventilation & air conditioning) commissioning engineer who diagnoses
+control loops." It sets the personality, the rules it must follow, and points to the
+playbook. *(File: `.github/agents/pid-loop-assessment.agent.md`.)*
 
-- The SNMP Agent runs as a **Windows service** set to start **automatically**, so it's
-  available as soon as the machine boots.
-- It reaches the building system through **SODIAPI**, which is hosted in Microsoft **IIS**
-  (a web server built into Windows) and built on the **.NET** platform using **WCF** (a
-  .NET technology for programs to talk to each other).
-- The three pieces — **SNMP Agent**, **SODIAPI**, and **DESIGO INSIGHT** — can live on
-  three separate computers **or all on one**; the design doesn't force a layout.
-- There is a strict **one-to-one** relationship: **one agent ↔ one SODIAPI endpoint ↔ one
-  DESIGO INSIGHT project**. To cover several building projects, you run several agents
-  side by side, each wired to its own project.
-- If SODIAPI isn't reachable when the agent starts, the agent keeps **retrying** on its
-  own until the connection comes up.
+**2. The skill (the playbook)** — the detailed, written-down procedure: how to read the
+data, which measurements to take, what each warning sign means, and how to write the
+report. This is the project's expert knowledge, captured on paper so the AI follows it
+the same careful way every single time. *(Folder: `.github/skills/pid-loop-assessment/`.)*
+
+**3. The Python tools** — small, tested programs that do the actual number-crunching:
+reading the data files, measuring the wiggles, scoring each time window, and generating
+the charts and report. Because these are fixed, tested programs, the math is always
+correct and **anyone can re-run them and get the identical answer**. The project ships a
+shared toolbox of these building blocks, plus one tailored analysis per loop it has
+studied so far — for example `analyze_pid_5min_loop.py` (an economizer) and
+`analyze_pid_supply_air.py` (a split-range face/bypass loop). Faced with a *new* loop,
+the agent writes a new tailored program in the same style rather than hand-editing an
+old one.
+
+> **Why separate the "thinking" from the "math"?** The AI is great at judgment,
+> explanation, and deciding *what* to do — but you don't want it doing critical
+> arithmetic freehand. By handing the arithmetic to fixed, tested tools, every number in
+> the report is trustworthy and repeatable. The AI conducts the orchestra; the tools play
+> the exact notes.
 
 ---
 
-## What the agent exposes — the MIB
+## How the agent thinks, step by step
 
-Everything the agent publishes lives under one address in the global SNMP tree, the
-Siemens **DESIGO INSIGHT** MIB module (its identifier, or **OID**, is
-`1.3.6.1.4.1.6361.8.1.1` — `6361` is Siemens Building Technologies' registered number).
+When you ask the agent to assess a loop, here's what happens behind the scenes — told as
+a story:
 
-The menu is organised into **three groups**:
+1. **It reads the playbook first.** Before touching your data, it opens the skill and
+   the field guide so it follows the proven procedure rather than improvising.
 
-| Group | What it's for |
+2. **It opens the two data files.** One file is the **temperature the building actually
+   reached** over time; the other is **how hard the controller was pushing** (a number
+   from 0% = off to 100% = flat out), also over time.
+
+3. **It reconstructs the full picture.** The data is recorded in a stingy way: a new
+   value is only saved *when something changes* (this is called **change-of-value**, or
+   COV, logging). Between saved points, the value simply stays the same. The agent
+   "fills in the gaps" so it has a continuous line to analyze instead of scattered dots.
+   *(See [the data explained](#the-key-ideas-in-plain-language) below.)*
+
+4. **It focuses on the parts that matter.** Stretches where the controller is pinned at
+   a limit with nothing moving carry little information; the agent concentrates on the
+   **active** periods where the controller is actually working, and flags the pinned
+   stretches separately.
+
+5. **It slides a "magnifying glass" across the timeline.** Rather than judging hours of
+   data all at once, it examines a **short window at a time** (for example, 5 minutes),
+   then slides that window forward a little and looks again — over and over. This is
+   called a **rolling window**, and it's how it catches problems that come and go.
+
+6. **It measures the shape of the wiggles in each window.** For every window it
+   calculates things like: How big is the swing? How many times did it change direction?
+   How long did it sit pinned at maximum? These measurements are its "senses."
+
+7. **It names the problem in each window.** Using the playbook's rules, it labels each
+   window: *healthy*, *integral windup*, *too aggressive*, *reacting to an outside
+   disturbance*, and so on.
+
+8. **It groups the findings into episodes.** If the same problem shows up in ten windows
+   in a row, that's one **episode**, not ten separate alarms. This keeps the report
+   readable.
+
+9. **It writes the verdict and builds the report.** Finally it produces a plain-English
+   summary ("the loop is mostly healthy but shows integral windup 18% of the time"),
+   color-coded tables, and charts — and checks its own work before handing it to you.
+
+Throughout, it keeps a little **to-do list** so it doesn't lose track of the multi-step
+job — just like a person ticking off tasks.
+
+---
+
+## Built to be general-purpose, not tied to one loop
+
+The goal of this project is **not** to analyze one specific air handler — it's to be a
+reusable **PID loop assessor** that can be pointed at many different loops. The specifics
+of a loop change; the diagnostic method doesn't.
+
+What stays the same for every loop:
+
+- the **shape-based** way of reading the data (works with or without a recorded target);
+- the **rolling-window** scan that says *when* a problem happens, not just *whether*;
+- the shared **metric toolbox** and **fault catalog** (hunting, windup, over-aggressive,
+  disturbance, saturation, …);
+- the **deliverables** — a plain-English verdict, a color-coded report, charts, and
+  spreadsheets.
+
+What changes from loop to loop is captured in a small, per-loop program:
+
+- **what the signals mean** (which file is the measurement, which is the command);
+- **how the command maps to hardware** — a simple valve is just 0–100%, but a
+  *split-range* loop uses one signal to drive **two** devices in sequence (e.g. 0–50%
+  strokes a face damper while a bypass stays open, and 50–100% strokes the bypass);
+- **which fault signatures are worth checking** for that loop (a split-range loop adds a
+  "handoff chatter" check a single valve never needs).
+
+The project already includes two worked examples that prove the point — a cooling
+**economizer** and a **face/bypass split-range** supply-air loop — both diagnosed with
+the same playbook and toolbox, each with its own report and notebook. Adding a third kind
+of loop follows the same recipe.
+
+---
+
+## The key ideas in plain language
+
+A few concepts come up repeatedly. Here they are without the jargon.
+
+### "Change-of-value" data (why the dots are so spread out)
+
+Instead of recording the temperature every second, the building only records a **new
+reading when the value actually changes** — to save storage space. Imagine a diary that
+only gets an entry on days something interesting happened; on all the other days, you
+assume things stayed the same as the last entry.
+
+That's efficient, but it means the raw data looks like scattered dots. Before analyzing,
+the agent connects those dots into a proper line by "holding" each value until the next
+one appears. This step is essential — skip it, and the measurements come out wrong.
+
+### The "rolling window" (looking through a moving magnifying glass)
+
+Judging a whole day of data at once would blur brief problems into the average. So the
+agent looks at a small slice of time, scores it, then shifts the slice forward and scores
+again — marching across the whole timeline. This is how it can say *when* a problem
+happened, not just *whether* it happened.
+
+### Metrics (the agent's "senses")
+
+A **metric** is just a number that measures one specific thing about the data — like
+"how big was the temperature swing" or "how many times did it change direction." On
+their own each is simple; combined, they let the agent recognize a problem's
+**fingerprint**. This project even **invents a few new metrics** (with friendly names
+like the *Hunting Index* and *Windup Index*) that bundle several measurements into a
+single, telling score.
+
+### Fault signatures (matching the fingerprint to a diagnosis)
+
+Each type of controller problem leaves a distinctive **fingerprint** in the wiggles. A
+slow, giant, one-directional swing points to *windup*; fast, tiny, back-and-forth jitter
+points to *over-aggressive tuning*. The playbook lists these fingerprints, and the agent
+matches what it measured against the catalog — exactly like a doctor matching symptoms to
+a diagnosis.
+
+---
+
+## The metrics, explained
+
+A **metric** is a single number that measures one feature of the wiggles. No single
+number is a diagnosis on its own — the agent reads the *combination*, the way a doctor
+reads several vital signs together. This section explains each one properly.
+
+### First: the two things being measured
+
+Every metric is computed on one of **two traces** over time:
+
+- **The measurement** (the "PV" — process variable): what the loop is trying to hold
+  steady, such as the supply-air temperature. This is the *result*.
+- **The command**: how hard the controller is pushing, from 0% (off / fully one way) to
+  100% (flat out / fully the other way). This is the *effort*.
+
+Watching **both** is the whole trick. A calm measurement with a thrashing command is an
+early warning; a wild measurement with a pinned command is a different story entirely.
+Some metrics look at the measurement, some at the command, and the composite scores below
+combine the two.
+
+### A quick word on "deadband" (ignoring the noise)
+
+Real sensors jitter by tiny amounts even when nothing is happening. If the agent counted
+every micro-wiggle it would see "oscillation" everywhere. So each metric uses a
+**deadband** — a small threshold (roughly half a degree for temperature, about one
+percent for the command) *below which a wiggle is treated as zero*. Only movements bigger
+than the deadband count. This is why the agent doesn't cry wolf over sensor noise.
+
+### The basic measurements (the raw "senses")
+
+| Plain name | What it measures | A high value hints at… |
+|---|---|---|
+| **Swing size** | How far the measured value moved from its lowest to its highest point in the window | a big disturbance or a big overshoot |
+| **Restlessness** | The total up-and-down distance travelled — like a car's odometer | a fidgety loop that never settles |
+| **Direction changes** | How many times the value turned around | many = fast oscillation; few = slow drift |
+| **Oscillation period** | If it is genuinely cycling, how long one full cycle takes | a rhythm that points to a specific tuning fault |
+| **Lopsidedness** | Whether the wiggle is a slow ramp then a fast drop (asymmetric) | a loop that keeps "winding up" |
+| **Time against the limit** | How much of the window the command sat pinned fully open or fully closed | windup, or simply running out of capacity |
+| **Handoff crossings** *(split-range loops only)* | How often the command crossed the point where control hands off from one device to another (e.g. 50%) | two devices thrashing at once |
+
+**In more depth — what each one really means:**
+
+- **Swing size (amplitude).** The simplest one: the highest value minus the lowest value
+  in the window. If the temperature wandered between 72°F and 78°F over five minutes, the
+  swing size is **6°F**. It tells you *how big* the movement was — but not whether it was
+  one clean move or lots of jitter. That's why it's never used alone.
+
+- **Restlessness (total travel).** Add up every up-and-down step, ignoring direction —
+  like a car's odometer versus the straight-line distance home. A value that went
+  72 → 75 → 73 → 76 travelled 3 + 2 + 3 = **8 units**, even though it only ended 4 above
+  where it started. High travel with a *small* swing size means the loop is fidgeting in
+  place; high travel with a *large* swing means big genuine excursions.
+
+- **Direction changes (reversals).** How many times the trace turned around (each turn
+  bigger than the deadband). In the 72 → 75 → 73 → 76 example there are **two**
+  turnarounds. This is the agent's frequency sense: *many* reversals = fast, tight
+  oscillation; *few* = a slow, one-way drift. It is the single most important clue for
+  telling windup apart from over-aggressive tuning.
+
+- **Oscillation period (rhythm).** *Only* calculated when the movement is genuinely
+  cyclic — the agent requires the value to cross its own average line at least **three
+  times** before it believes a rhythm is real (two crossings can happen by accident). If
+  it crossed six times in a five-minute window, that's about three full cycles, or a
+  period of roughly **1.7 minutes per cycle**. A short period points at proportional
+  gain; a long, lazy period points at the integral term.
+
+- **Lopsidedness (sawtooth skew).** Compares the *shape* of the climbs to the drops. A
+  smooth, symmetric wave is balanced. A **shark-fin** shape — a slow ramp up followed by
+  a sudden drop (or vice versa) — is lopsided, and that asymmetry is the classic tell of
+  a loop that slowly "winds up" and then snaps back.
+
+- **Time against the limit (rail dwell).** The fraction of the window the command spent
+  pinned near a limit — fully open or fully closed. If the command sat at/near 100% for
+  four of five minutes, that's **80%**. Sitting against a limit is normal briefly, but
+  *long* dwell while the measurement is still drifting is the setup for windup, or a sign
+  the equipment simply can't keep up (it has run out of capacity).
+
+- **Handoff crossings (split-range only).** Counts how many times the command crossed the
+  point where control hands from one device to the next — 50% for a face/bypass damper
+  pair. A command that went 45 → 55 → 48 → 52 crossed the 50% line **three** times, which
+  means *both* devices were stroking at once. A plain single valve never has this metric.
+
+### The invented composite scores (fingerprints)
+
+Textbook metrics usually assume you have the target line to compare against. With only
+the *shape* to go on, this project combines the basic measurements above into a few new
+scores, each tuned to capture one fault's fingerprint:
+
+| Score | What it bundles together | It runs high when… |
+|---|---|---|
+| **Hunting Index** | direction changes × swing size | the loop oscillates both *often* and *widely* |
+| **Aggression Index** | command direction changes × command range | the controller is thrashing its output hard |
+| **Windup Index** | time-against-the-limit × swing size (weighted up when direction changes are few) | you see the classic "pinned at the limit, then one big slow swing" windup shape |
+| **Crossover Thrash Index** *(split-range)* | handoff crossings × command range | the handoff point itself is hunting |
+| **Loop lag** | the delay between the controller pushing and the measurement responding | (not a fault score) it tells the agent how sluggish the system is |
+
+**Why bundle them? — the composite scores in more depth:**
+
+- **Hunting Index = direction changes × swing size.** Either ingredient alone is
+  misleading. Ten tiny reversals of a 0.2° wiggle is just noise; one giant 6° swing with
+  no reversals is a disturbance, not hunting. *Real* hunting needs **both** frequency and
+  size, so multiplying them gives one honest number that only lights up for genuine
+  oscillation.
+
+- **Aggression Index = command reversals × command range.** This one watches the *effort*
+  side, not the result. A controller can be furiously sawing its command back and forth
+  while the measurement still looks calm — an early warning that the proportional gain is
+  set too high and the loop is working far harder than it should.
+
+- **Windup Index = rail dwell × swing size, weighted for slowness.** This is the star
+  detector. It's built to fire on one specific shape: the command **pinned against a
+  limit** *and* a **big** swing in the measurement *and* — crucially — **few** direction
+  changes (a slow turnaround). The "weighted for slowness" part means a fast, jittery
+  swing is deliberately *down-weighted*, because fast jitter is P-too-high, not windup.
+  So the same swing size scores as windup when it turns slowly and as something else when
+  it turns fast.
+
+- **Crossover Thrash Index = handoff crossings × command range** *(split-range)*. Ranks
+  the windows where the handoff point itself is hunting — both dampers/valves cycling at
+  once. This flags actuator wear that a single-device loop simply cannot produce.
+
+- **Loop lag** — not a fault score, but the ruler everything else is judged against. The
+  agent slides the command trace and the measurement trace past each other in time until
+  the command's moves best line up with the measurement's *later* moves; that offset is
+  the lag. It matters because tuning that is perfect on a fast loop is dangerously
+  aggressive on a slow, laggy one — the lag sets what "good" even means for this loop.
+
+### Putting it together — how the numbers name a fault
+
+The power is in the *combination*. The same big swing size means completely different
+things depending on the other metrics:
+
+| The fingerprint | Swing size | Direction changes | Command | Verdict |
+|---|---|---|---|---|
+| Pinned at limit, one big slow swing | large | **few** | stuck against a rail | **Integral windup** |
+| Fast, tight, symmetric jitter | large | **many** (short period) | thrashing | **P too high** |
+| One big move, then settles | large | **very few** | *actively moving*, not pinned | **Disturbance** (not a fault) |
+| Barely moving | small | few | calm | **Calm / healthy** |
+
+Notice rows 1 and 3 have the *same* swing size and few direction changes — what separates
+them is the **command**: windup keeps the command jammed against a limit, while a
+disturbance shows the command actively chasing the change. That is exactly why the agent
+insists on reading the measurement and the command *together* rather than trusting any
+one metric.
+
+The full technical definitions live in the playbook's **metric glossary**; this section
+is the plain-English version.
+
+---
+
+## The tools the agent uses
+
+Remember the difference between a chatbot (words only) and an agent (words **plus
+actions**). Those actions are called **tools** — the specific things the agent is allowed
+to do to get the job done. It reaches for a different one at each step of the story
+above:
+
+| Tool (capability) | What the agent does with it |
 |---|---|
-| **`agentSupervision`** | A quick health check of the agent itself (see [Health](#health-security-and-reliability)). |
-| **`alarms`** | Everything about the building's current alarms (see [Alarms](#alarms-in-plain-language)). |
-| **`logs`** | Access to the building system's log entries (see [Logs](#logs-in-plain-language)). |
+| **Read** | Open and read the playbook, the field guide, and your data files. |
+| **Search** | Hunt through the project to find the right file, a reusable helper, or an earlier analysis. |
+| **Edit / create files** | Write the tailored analysis program, the notebook, and the report. |
+| **Run (execute)** | Actually *run* the program and the notebook to produce real numbers and charts — never guessed ones. |
+| **Task list** | Keep a running checklist so a multi-step job doesn't drop a step. |
+| **Notebook tools** | Open, edit, and run the interactive notebook cell by cell. |
+| **Browser tools** | Optionally open the finished report in a web browser to confirm it looks right. |
+
+The playbook tells the agent *which* tool to reach for at each step. The **Run** tool is
+the crucial one: it is what lets the agent **check its own work against real data**
+instead of merely asserting an answer — the single biggest reason to trust the numbers in
+the report. The full list is in the playbook's **tools reference**.
 
 ---
 
-## Alarms, in plain language
+## How do we know it actually works? Testing with known faults
 
-This is the heart of the agent. It offers three complementary ways to know about alarms.
+Here's a fair question anyone should ask about a diagnostic tool: **how do we know it's
+right?** A tool that confidently prints the wrong diagnosis is worse than no tool at all.
 
-**1. The full list — `alarmTable`.** A monitoring tool can read a table of every building
-point that is currently in an alarm state, with details for each one (its system id,
-description, and so on). To keep this manageable you can **filter** what appears (below).
+The honest answer is that you can't fully trust a diagnostician until you've watched them
+work on cases where **you already know the answer** — like giving a trainee an eye chart
+you can read yourself, or dipping a new thermometer in ice water to confirm it says 0°C.
+That's exactly what we do here.
 
-**2. The scoreboard — `alarmSummary`.** Rather than the full list, you can just ask for
-the **counts**: how many **high**, **medium**, and **low** priority alarms are active
-right now. (The scoreboard always reflects *all* alarms — the filter does not change these
-totals.)
+### The problem: real data has no answer key
 
-**3. The doorbells — traps (push alerts).** Two kinds of automatic notification:
+The real building exports are honest but frustrating: nobody wrote down "the loop was
+winding up between 2 and 3 p.m." So when the agent flags windup, there's no official
+record to check it against. We *believe* the diagnosis from the shape of the data, but we
+can't score it.
 
-- **`alarmSummaryTrap`** fires whenever the scoreboard changes, carrying the new high /
-  medium / low counts.
-- **`alarmDetailTrap`** fires for **each individual** alarm change on a single point,
-  carrying that point's full details. When the agent starts up, it sends one of these for
-  every point already in alarm (so a restart can produce a burst of catch-up notices).
+### The fix: build a loop where we cause the faults on purpose
 
-### Filtering which alarms you see
+So we create our own practice patient. On the computer we build a **pretend control
+loop** — a simple simulated system with a controller nudging it, just like the real thing
+— and then we deliberately break it in specific, known ways. We run it five times back to
+back, each stretch carrying exactly one planted problem:
 
-Because a big site can have a lot of alarms, the agent reads an **XML configuration file**
-that lets you narrow the `alarmTable` (and the detail traps) by any mix of:
+- a **healthy** stretch (nothing wrong — the agent should stay quiet);
+- a stretch tuned **too aggressively**, so it jitters rapidly;
+- a stretch that suffers **integral windup** (over-commits while maxed out, then
+  overshoots);
+- a stretch that **over-corrects slowly**, rolling past the target and back;
+- a stretch hit by an **outside disturbance** (a sudden load change the loop must chase).
 
-- **System ids** — restrict to specific points (or whole sites/devices via partial ids);
-- **Alarm states** — restrict to specific states;
-- **Alarm conditions** — restrict to specific conditions.
+Crucially, we save all of this in the **exact same format as the real data**, and then we
+hand it to the agent **without telling it where the planted faults are.** The agent
+analyzes it blind, the same way it analyzes a real export.
 
-Multiple values of the *same* kind are combined with **OR**; different kinds are combined
-with **AND** — e.g. *(this point OR that point) AND (this condition OR that condition)*.
+### The scoreboard
 
----
+Because *we* know what we planted, we can grade the agent automatically. For each stretch
+we compare **what we caused** against **the agent's dominant verdict**, and tally how many
+it got right — a simple report card. That scoreboard is the whole point: it turns "trust
+me" into a number you can actually see.
 
-## Logs, in plain language
+Here is the current result. Analysing the data **blind**, the agent correctly recovered
+**all five** planted faults as the leading signature of their stretch:
 
-The agent also exposes the building system's **log entries** through a `logTable`.
+| What we planted | What the agent decided (blind) | Right? |
+|---|---|---|
+| Healthy (calm) | Calm | ✓ |
+| Too aggressive (fast jitter) | P too high | ✓ |
+| Integral windup | Integral windup | ✓ |
+| Slow over-correction | Too much integral | ✓ |
+| Outside disturbance | Disturbance | ✓ |
 
-- Because the log database can be huge, you **must** filter it (see below), and in any
-  case the agent **caps the table at 1000 entries** to protect performance.
-- A companion value, **`logTableOverflow`**, is set to **1** if your filter still matched
-  more than 1000 entries (so the list was trimmed), or **0** if everything fit.
-- A **`logTrap`** fires when new entries appear. The agent finds new entries by **polling**
-  SODIAPI on a schedule you configure (the interval is in seconds, with a **60-second
-  minimum**).
+### The honest part
 
-### Filtering which log entries you see
+That five-for-five did **not** happen on the first try, and the story is the real lesson.
+The very first run scored only **2 out of 5** — the healthy and disturbance cases were
+right, but the three dynamic faults all collapsed into "disturbance." The scoreboard
+caught it immediately, and the cause turned out to be *our simulation, not the agent*: our
+fake data was unrealistically smooth, so the tell-tale wiggles were too small for the
+agent to register. Once we made the simulated loop record its data the way real equipment
+does — in small discrete steps — and pushed each planted fault past its real threshold,
+the score climbed to **5 out of 5**.
 
-As with alarms, an XML filter narrows the `logTable` by:
+Two things are worth being honest about even so:
 
-- **Event group** — restrict to specific groups of events;
-- **Event number** — restrict to specific event types.
+- **This was calibration, not luck.** The known answer key is exactly what exposed the
+  smooth-data problem and told us how to fix it. Without it, we'd have shipped a tool that
+  quietly mislabelled three faults out of five and never known.
+- **The margins are still thin on the subtle cousins.** "Slow over-correction" and "too
+  aggressive" are both oscillations; "windup" and a plain "disturbance" differ only in
+  whether the command is jammed against its limit. So while the agent gets the *overall*
+  verdict for each stretch right, individual short windows inside a stretch still
+  occasionally land on the neighbouring fault. That's an inherent limit of judging by
+  shape alone without a target line — and the benchmark makes it visible rather than
+  hiding it.
 
-Again: same-kind values are **OR**-ed, different kinds are **AND**-ed. The guidance is to
-make this filter **highly selective**, precisely because of the 1000-entry ceiling.
+### Where this lives, and what else you can use
 
----
-
-## Health, security, and reliability
-
-- **Is the link healthy? — `sodiapiStatus`.** A single value the monitoring room can read
-  to check the agent's health:
-
-  | Value | Meaning |
-  |---|---|
-  | **OK** | The agent is running fine. |
-  | **No SODIAPI** | The agent can't reach the SODIAPI service. |
-  | **No DI** | SODIAPI is reachable, but *it* can't reach DESIGO INSIGHT. |
-
-  When something's wrong, the detailed reason is in the agent's own log messages.
-
-- **Security — SNMP v3 with authentication.** The agent uses **SNMP version 3** and
-  **requires clients to authenticate**; anonymous access is not allowed. (Message
-  *privacy/encryption* is not part of this design.)
-
-- **Always-on startup.** Running as an automatic Windows service, it comes up with the
-  machine and reconnects to SODIAPI by itself if the connection drops.
-
-- **Its own logging — Log4Net.** The agent writes detailed diagnostics using **Log4Net**,
-  a flexible logging library. A config file decides *what* is logged and *where* it goes
-  (rolling files, the Windows event log, and so on). Deployment is just including the
-  `log4net.dll` file.
-
-- **Performance.** The number of log-table entries is the performance-critical factor,
-  which is why the selective filter and the hard 1000-entry cap both exist.
-
-- **Recovery.** If the agent fails unexpectedly, its hosting Windows service can simply be
-  restarted from the Windows Services panel.
+The simulated test set and its scorecard live in their own separate **`Simulated
+Benchmark/`** folder (generator `simulate_pid_benchmark.py`, grader
+`analyze_pid_simulated.py`). You don't have to use *our* simulation, either — a second
+harness in the **`Tennessee Eastman/`** folder (`load_tep.py` + `analyze_pid_external.py`)
+grades the agent against an **outside, independently-labelled public dataset**, and the
+same adapter accepts other labelled loop datasets from Kaggle and GitHub.
 
 ---
 
-## What you need to run it
+## How well does it perform? The scorecard so far
 
-**Software prerequisites (from the concept):**
+For a diagnostic tool, "performance" means two things: does it **catch the faults that are
+really there**, and does it **stay quiet when nothing is wrong?** We measure both only on
+data where the answer is already known. Two independent checks so far:
 
-- Windows Server 2008 or later
-- .NET Framework 4.0
-- SODIAPI V2.0
-- DESIGO INSIGHT V4.1
+### 1. The controlled simulation — grading the exact diagnosis
 
-**Other practicalities:**
+Five stretches, one planted fault each, analysed blind. The agent named the correct fault
+as the **leading verdict of all five** stretches:
 
-- **Installation is manual** — both the SNMP Agent and SODIAPI are installed by hand,
-  following their respective guides.
-- **Configuration is via files** — the agent's alarm/log filters and behaviour come from
-  an XML config file; Log4Net has its own config file.
-- **No licence protection in the agent itself**, though the **SODIAPI** layer it relies on
-  is a licensed DESIGO INSIGHT feature.
-- **English only** — the agent carries no text needing translation; any localised text
-  comes from DESIGO INSIGHT itself.
+| Planted fault | Agent's leading verdict (blind) | Result |
+|---|---|---|
+| Healthy | Calm | ✓ |
+| Too aggressive | P too high | ✓ |
+| Integral windup | Integral windup | ✓ |
+| Slow over-correction | Too much integral | ✓ |
+| Outside disturbance | Disturbance | ✓ |
+
+**Score: 5 / 5.**
+
+### 2. An outside labelled dataset — grading the timing
+
+Using a public process-control benchmark (Tennessee Eastman) carrying a **sticking-valve**
+fault, the agent stayed calm through the healthy baseline and raised a flag across the
+whole faulty stretch — **2 / 2** labelled periods handled correctly — and the flag it
+raised (*oscillation*) even matched the expected category.
+
+### Reading the score honestly
+
+- **Strong on clear-cut faults.** Big, distinct problems — violent oscillation, a command
+  pinned at its limit, a healthy loop — are called correctly and confidently.
+- **The subtle cousins are where it slips.** "Slow over-correction" versus "too
+  aggressive," or "windup" versus a plain "disturbance," differ only by fine margins (how
+  fast the value wiggles, whether the command is jammed against its limit). The *overall*
+  verdict for each stretch is right, but individual short windows inside it still
+  sometimes land on the neighbouring fault.
+- **It errs toward flagging, not hiding.** Around the moment a fault begins, a few windows
+  get flagged slightly early — a cautious bias that is far preferable to missing a real
+  fault, but worth knowing.
+- **These are known-answer tests, not a field trial.** The numbers above come from
+  controlled data with a built-in answer key. They show the method is *sound*; they are
+  not yet a large real-world validation, which would need many labelled real loops.
+
+**Bottom line:** on data where we know the truth, the agent **catches every planted fault
+and stays quiet on healthy stretches**, with its only real weakness being the fine line
+between similar oscillation-type faults — the very boundary a human tuner also finds hard.
+
+---
+
+## What you get at the end
+
+The agent doesn't just answer in the chat — it produces real, shareable files:
+
+- **A plain-English verdict.** One or two paragraphs anyone can read: what's healthy,
+  what's not, how often, and what to do about it.
+- **A polished HTML report** you can open in any web browser — with color-coded tables,
+  charts, and even the underlying calculations embedded so it's fully transparent.
+- **Charts** that show the temperature and the controller's effort over time, with the
+  problem periods highlighted.
+- **Spreadsheet files (CSV)** listing every window and every episode, for anyone who
+  wants to dig into the raw findings.
+- **A Jupyter notebook** — an interactive document that mixes explanation, code, and
+  results, so a technical colleague can re-run and verify everything.
+
+Everything is **reproducible**: run it again on the same data and you get the same
+answer, every time.
+
+---
+
+## How you actually use it
+
+There are two ways, depending on who you are.
+
+**If you just want the analysis (no technical setup):**
+Open this project in **VS Code** (a free, popular code editor from Microsoft), open the
+**Copilot Chat** panel, pick **"PID Loop Assessment"** from the agent menu, and type a
+plain request such as:
+
+> *"Assess how this loop is performing over 5-minute windows — check for hunting,
+> integral windup, or over-aggressive tuning."*
+
+The agent takes it from there and hands back the verdict and the report.
+
+**If you're comfortable running a command:**
+From the project folder, run a single command — `python run_analysis.py` — and it
+produces the report, charts, and spreadsheets automatically. Each analyzed loop has its
+own script in the same style (for example `python analyze_pid_supply_air.py` for the
+split-range loop). *(Full setup instructions live in the full project repository.)*
+
+---
+
+## Why build it this way?
+
+You might wonder: why the three-part structure instead of just asking a chatbot?
+
+- **Consistency.** The written playbook means the agent does the analysis the same
+  careful way every time, rather than improvising differently on each run.
+- **Trustworthy numbers.** Handing the math to tested tools means the figures are
+  reliable and reproducible — critical when someone's going to act on the diagnosis.
+- **Transparency.** Every report shows its work; nothing is a mysterious black box.
+- **Reusability.** The same playbook can guide the AI on new data or new questions
+  without rebuilding anything.
+- **Portability.** It runs on any modern computer with the free tools installed; it
+  isn't locked to one machine.
+
+In short: you get the **judgment and clear explanations of an AI** combined with the
+**precision and repeatability of tested software** — the best of both.
+
+---
+
+## Honest limitations
+
+Good diagnostics are honest about what they *can't* prove:
+
+- **The target is often missing.** As explained earlier, the agent usually judges by the
+  *shape* of the data, not by comparing to a goal. That makes every verdict a
+  **well-informed screening flag, not final proof.** It tells you where to look, not a
+  courtroom-certain conclusion.
+- **The data is sparse.** Because values are only saved when they change, the agent has
+  to reconstruct the in-between — a careful estimate, not a perfect recording.
+- **To *confirm* a diagnosis**, a technician should capture higher-detail data —
+  including the target value — during a live tuning session. The agent's job is to point
+  them straight to the problem so that follow-up is quick and focused.
 
 ---
 
@@ -264,38 +704,38 @@ make this filter **highly selective**, precisely because of the 1000-entry ceili
 
 | Term | Plain meaning |
 |---|---|
-| **SNMP** | A common language monitoring tools use to query devices and receive alerts. |
-| **SNMP v3** | The modern SNMP version this agent uses; supports authenticating clients. |
-| **Agent** | Software on the watched system that answers SNMP questions — here, for DESIGO INSIGHT. |
-| **MIB** | The catalogue of everything an SNMP agent can be asked, in a standard tree form. |
-| **OID** | The numeric "address" of an item within that tree (e.g. `1.3.6.1.4.1.6361.8.1.1`). |
-| **Trap** | An SNMP push alert the agent sends the moment something changes. |
-| **DESIGO INSIGHT** | Siemens' building-management system that this agent exposes. |
-| **BMS** | Building-management system — the software running a building's equipment. |
-| **SODIAPI** | Service-Oriented DESIGO INSIGHT API — the service doorway the agent uses to reach DESIGO INSIGHT. |
-| **WCF** | A .NET technology for programs to talk to each other over a network. |
-| **IIS** | Internet Information Services — the web server built into Windows that hosts SODIAPI. |
-| **.NET** | Microsoft's software platform the agent and SODIAPI are built on. |
-| **Log4Net** | A flexible logging library the agent uses for its own diagnostics. |
-| **Data point** | A single monitored thing in the building (a sensor, valve, fan, etc.). |
-| **Alarm state / condition** | The specific status of a data point used to describe and filter alarms. |
-| **Windows service** | A background program that runs without a user logged in and can start automatically. |
+| **AI agent** | An AI that can *do* tasks (read, calculate, create files), not just chat. |
+| **Skill / playbook** | A written, step-by-step procedure the AI follows so it works consistently. |
+| **PID controller** | The automatic "cruise control" that holds any measured value — temperature, pressure, flow — steady. |
+| **Economizer / damper / valve** | Examples of the hardware a controller nudges. The agent handles any of them. |
+| **Split-range** | One command signal driving two devices in sequence (e.g. face + bypass dampers), handing off at a crossover point. |
+| **Process variable (PV)** | The thing being measured and controlled — a temperature, pressure, flow, and so on. |
+| **Setpoint / target** | The value the controller is *trying* to reach (often not recorded in the data). |
+| **Saturation** | The controller pushing to a limit (fully open or closed) and still not reaching the target. |
+| **Hunting / oscillation** | The controller constantly overshooting and correcting — never settling. |
+| **Integral windup** | The controller "over-commits" while maxed out, then overshoots badly later. |
+| **Change-of-value (COV)** | A stingy way of recording data: only save a new value when it changes. |
+| **Rolling window** | Analyzing a short slice of time, then sliding it forward — a moving magnifying glass. |
+| **Metric** | A single number that measures one specific feature of the data. |
+| **Fault signature** | The distinctive "fingerprint" a particular problem leaves in the data. |
+| **Episode** | A run of consecutive windows showing the same problem, grouped into one finding. |
+| **Python** | A popular programming language; here, the trusted "calculators" that crunch the numbers. |
+| **Jupyter notebook** | An interactive document mixing explanation, code, and results. |
+| **HTML report** | A web-page report you can open in any browser and share. |
 
 ---
 
-## Status and limitations
+## Where to go next
 
-- This describes a **design concept (v0.3, 2010)**, not a finished product. Details such
-  as exact MIB fields and version numbers reflect that document and may differ from any
-  later implementation.
-- The design deliberately **omits message privacy/encryption** (it authenticates clients
-  but does not encrypt SNMP traffic).
-- The **log table is capped at 1000 entries**; a selective filter is essential.
-- Everything depends on the **SODIAPI ↔ DESIGO INSIGHT** chain being healthy — the
-  `sodiapiStatus` value is the first thing to check when data looks wrong.
+The following companion documents and code live in the **full project repository** (the
+complete toolkit — agent files, skill/playbook, Python modules, notebooks, and datasets):
+
+- **The technical setup and commands** — the project's main README.
+- **The star problem, integral windup, with pictures** — the integral-windup write-up.
+- **The deep control-theory field guide** — the loop-tuning reference.
+- **Where the data comes from** — the fieldbus / data-source notes.
 
 ---
 
-*This document explains the concept in everyday terms. For exact object definitions, the
-full MIB, alarm-state tables, and event-number lists, see the original Ascentiv concept
-document.*
+*This document explains the concepts in everyday terms. For exact procedures, formulas,
+and code, see the full project repository.*
