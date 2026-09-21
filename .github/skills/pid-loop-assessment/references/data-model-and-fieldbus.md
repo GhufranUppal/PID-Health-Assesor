@@ -23,19 +23,18 @@ Consequences the analysis must respect:
 ## Point mapping (confirm before attaching units)
 | File | BACnet object (typical) | Meaning |
 |---|---|---|
-| `PID/Input.csv` | Analog Input / Analog Value | **Process variable** — supply-air temperature / PID input (°F) |
-| `PID/PID out.csv` | Analog Output | **Command** — economizer damper 0–100 % |
+| `PID/Input.csv` | Analog Input / Analog Value | **Process variable** — the controlled measurement (flow, pressure, temperature, level, …) |
+| `PID/PID out.csv` | Analog Output | **Command** — final-element position, 0–100 % |
 
 There is **no setpoint (Analog Value setpoint) channel** in the export, which is why the
 loop is graded from waveform *shape* rather than measured error.
 
-## The economizer loop in context
-The economizer is a **cooling-only** loop: the outside-air damper modulates for free
-cooling. When the damper is at 100 % and still can't meet the supply-air target, a
-**chilled-water valve** (a *separate* loop, not in this export) stages on to trim. So
-during 100 % spans the economizer command is pinned and is **not** the element in
-control — those spans are excluded from tuning analysis. The plant context is shown in
-[resources/CHILLEDWATERFLOWDRAWING3.vsdx](../../../docs/resources/CHILLEDWATERFLOWDRAWING3.vsdx).
+## Saturated spans are excluded from tuning analysis
+When the command sits pinned at a limit (e.g. 100 %) it is **not** the element in
+control — a downstream stage or a separate loop may be trimming, or the equipment has
+simply run out of capacity. Those spans carry little tuning information, so they are
+flagged separately and excluded from the rolling-window tuning analysis; the assessment
+concentrates on the **active** spans where the command is actually modulating.
 
 ## Exporting equivalent data from other fieldbuses
 To reproduce this analysis on another loop, export two COV/trend logs — the PV and the

@@ -5,13 +5,13 @@ Each rolling window is mapped to exactly one signature. The discriminators are t
 **PV reversal rate** (frequency). Consecutive same-signature windows are collapsed into
 **episodes**.
 
-| Signature | Fingerprint (data rule) | Physical meaning | Fix (field guide) |
+| Signature | Fingerprint (data rule) | Physical meaning | Fix (see SKILL Part I) |
 |---|---|---|---|
-| **Integral windup** | near-rail dwell ≥ 0.5, big amplitude, **reversals < 3** | Output saturated; integral keeps accumulating, overshoots and unwinds late → one big slow swing | Enable anti-windup / integral clamping; verify output limits (§12, §13) |
-| **P too high (fast oscillation)** | big amplitude, **reversals ≥ 4**, short period | Proportional gain too high → fast, tight, symmetric ripple | Lower `Kp`; add small `Kd` (§5, §13) |
-| **P & I too high (sawtooth)** | high sawtooth skew, high total variation, reversals ≥ 2 | Ramp-then-drop that keeps accelerating | Lower P first, then lengthen reset (§5, §13) |
-| **Too much integral (slow rolling)** | big amplitude, reversals ≥ 2, **long** period | Reset too fast → slow rolling overshoot | Lengthen integral time (§4, §13) |
-| **Disturbance / step (not tuning)** | big amplitude, **reversals < 2**, command often **not** pinned | Load/mode change the loop is responding to | Not a tuning fault; correlate with load and mode changes (§11) |
+| **Integral windup** | near-rail dwell ≥ 0.5, big amplitude, **reversals < 3** | Output saturated; integral keeps accumulating, overshoots and unwinds late → one big slow swing | Enable anti-windup / integral clamping; verify output limits |
+| **P too high (fast oscillation)** | big amplitude, **reversals ≥ 4**, short period | Proportional gain too high → fast, tight, symmetric ripple | Lower `Kp`; add small `Kd` |
+| **P & I too high (sawtooth)** | high sawtooth skew, high total variation, reversals ≥ 2 | Ramp-then-drop that keeps accelerating | Lower P first, then lengthen reset |
+| **Too much integral (slow rolling)** | big amplitude, reversals ≥ 2, **long** period | Reset too fast → slow rolling overshoot | Lengthen integral time |
+| **Disturbance / step (not tuning)** | big amplitude, **reversals < 2**, command often **not** pinned | Load/mode change the loop is responding to | Not a tuning fault; correlate with load and mode changes |
 | **Calm** | none of the above | Loop is behaving | — |
 
 ## The key discriminator
@@ -22,11 +22,10 @@ Each rolling window is mapped to exactly one signature. The discriminators are t
   near-rail dwell) — the loop has authority and is chasing a load change.
 
 ## Integral windup — the signature in detail
-From the field guide (§12): *"If the output saturates (valve fully open/closed), the
+As in the anti-windup discussion (SKILL Part I §7): *"If the command saturates, the
 integral keeps accumulating error it can't act on, then overshoots badly when it finally
-unwinds."* In a cooling-only economizer this reads as: **command pinned ≥ 95 % (max
-cooling)** while the supply-air makes a **large, low-frequency** excursion and reverses
-**late**. See the illustrated walkthrough in `README-INTEGRAL-WINDUP.md`.
+unwinds."* In the data this reads as: **command pinned near its limit** while the PV
+makes a **large, low-frequency** excursion and reverses **late** (few reversals).
 
 ## Always attach the caveat
 No setpoint channel + COV sparsity → these are **shape-based screening flags**, not

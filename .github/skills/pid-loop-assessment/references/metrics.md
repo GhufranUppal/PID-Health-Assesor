@@ -6,7 +6,7 @@ grid inside each active span), never on raw COV rows.
 ## Standard metrics (per rolling window)
 | Metric | Definition | What it tells you |
 |---|---|---|
-| `pv_range` | max − min of the PV in the window | raw amplitude of the supply-air swing |
+| `pv_range` | max − min of the PV in the window | raw amplitude of the PV swing |
 | `pv_tv` (total variation) | Σ |Δpv| past a deadband | "odometer" travel / restlessness |
 | `pv_reversals` | count of sign changes of Δpv past a deadband | how often the PV turns around → **frequency** |
 | `pv_period_min` | 2 × window ÷ mean-crossings (only if ≥ 3 crossings) | implied oscillation period (min/cycle) |
