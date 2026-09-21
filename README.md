@@ -6,7 +6,6 @@
   - [Table of contents](#table-of-contents)
   - [The 30-second version](#the-30-second-version)
   - [What problem does *this* agent solve?](#what-problem-does-this-agent-solve)
-    - [The twist that makes this hard](#the-twist-that-makes-this-hard)
   - [The three pieces that make up this agent](#the-three-pieces-that-make-up-this-agent)
   - [How the agent thinks, step by step](#how-the-agent-thinks-step-by-step)
   - [Built to be general-purpose, not tied to one loop](#built-to-be-general-purpose-not-tied-to-one-loop)
@@ -89,19 +88,6 @@ looks for — in *any* loop:
 
 The agent reads the building's own recorded data and figures out **which** of these is
 happening, **when**, and **how often** — then writes it up in plain English.
-
-### The twist that makes this hard
-
-Normally, to judge a controller you compare two things: the **target** value and the
-**actual** value. But in real exports the target is **often missing** — it simply wasn't
-recorded. It's like being asked "was the driver holding their speed well?" when you can
-only see how the car moved — not what speed they were *aiming* for.
-
-So the agent's core skill is judging health purely from the **shape** of the wiggles in
-the data — exactly the way a veteran engineer can glance at a chart and say "that's
-overshooting" without needing the target line. This shape-based method is what makes the
-agent **general-purpose**: it works on any loop, with or without a recorded target.
-Teaching an AI to do that reliably is the clever part.
 
 ---
 
