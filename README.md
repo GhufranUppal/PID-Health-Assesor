@@ -12,23 +12,42 @@ appears. If you only read one document in this project, read this one.
 
 ## Table of contents
 
-1. [The 30-second version](#the-30-second-version)
-2. [The everyday analogy: a smart assistant with a playbook](#the-everyday-analogy-a-smart-assistant-with-a-playbook)
-3. [What problem does *this* agent solve?](#what-problem-does-this-agent-solve)
-4. [The three pieces that make up this agent](#the-three-pieces-that-make-up-this-agent)
-5. [How the agent thinks, step by step](#how-the-agent-thinks-step-by-step)
-6. [Built to be general-purpose, not tied to one loop](#built-to-be-general-purpose-not-tied-to-one-loop)
-7. [The key ideas in plain language](#the-key-ideas-in-plain-language)
-8. [The metrics, explained](#the-metrics-explained)
-9. [The tools the agent uses](#the-tools-the-agent-uses)
-10. [How do we know it actually works? Testing with known faults](#how-do-we-know-it-actually-works-testing-with-known-faults)
-11. [How well does it perform? The scorecard so far](#how-well-does-it-perform-the-scorecard-so-far)
-12. [What you get at the end](#what-you-get-at-the-end)
-13. [How you actually use it](#how-you-actually-use-it)
-14. [Why build it this way?](#why-build-it-this-way)
-15. [Honest limitations](#honest-limitations)
-16. [Mini-glossary](#mini-glossary)
-17. [Where to go next](#where-to-go-next)
+- [PID Loop Health Assessor — How This Agent Works (A Plain-English Guide)](#pid-loop-health-assessor--how-this-agent-works-a-plain-english-guide)
+  - [Table of contents](#table-of-contents)
+  - [The 30-second version](#the-30-second-version)
+  - [What problem does *this* agent solve?](#what-problem-does-this-agent-solve)
+    - [The twist that makes this hard](#the-twist-that-makes-this-hard)
+  - [The three pieces that make up this agent](#the-three-pieces-that-make-up-this-agent)
+  - [How the agent thinks, step by step](#how-the-agent-thinks-step-by-step)
+  - [Built to be general-purpose, not tied to one loop](#built-to-be-general-purpose-not-tied-to-one-loop)
+  - [The key ideas in plain language](#the-key-ideas-in-plain-language)
+    - ["Change-of-value" data (why the dots are so spread out)](#change-of-value-data-why-the-dots-are-so-spread-out)
+    - [The "rolling window" (looking through a moving magnifying glass)](#the-rolling-window-looking-through-a-moving-magnifying-glass)
+    - [Metrics (the agent's "senses")](#metrics-the-agents-senses)
+    - [Fault signatures (matching the fingerprint to a diagnosis)](#fault-signatures-matching-the-fingerprint-to-a-diagnosis)
+  - [The metrics, explained](#the-metrics-explained)
+    - [First: the two things being measured](#first-the-two-things-being-measured)
+    - [A quick word on "deadband" (ignoring the noise)](#a-quick-word-on-deadband-ignoring-the-noise)
+    - [The basic measurements (the raw "senses")](#the-basic-measurements-the-raw-senses)
+    - [The invented composite scores (fingerprints)](#the-invented-composite-scores-fingerprints)
+    - [Putting it together — how the numbers name a fault](#putting-it-together--how-the-numbers-name-a-fault)
+  - [The tools the agent uses](#the-tools-the-agent-uses)
+  - [How do we know it actually works? Testing with known faults](#how-do-we-know-it-actually-works-testing-with-known-faults)
+    - [The problem: real data has no answer key](#the-problem-real-data-has-no-answer-key)
+    - [The fix: build a loop where we cause the faults on purpose](#the-fix-build-a-loop-where-we-cause-the-faults-on-purpose)
+    - [The scoreboard](#the-scoreboard)
+    - [The honest part](#the-honest-part)
+    - [Where this lives, and what else you can use](#where-this-lives-and-what-else-you-can-use)
+  - [How well does it perform? The scorecard so far](#how-well-does-it-perform-the-scorecard-so-far)
+    - [1. The controlled simulation — grading the exact diagnosis](#1-the-controlled-simulation--grading-the-exact-diagnosis)
+    - [2. An outside labelled dataset — grading the timing](#2-an-outside-labelled-dataset--grading-the-timing)
+    - [Reading the score honestly](#reading-the-score-honestly)
+  - [What you get at the end](#what-you-get-at-the-end)
+  - [How you actually use it](#how-you-actually-use-it)
+  - [Why build it this way?](#why-build-it-this-way)
+  - [Honest limitations](#honest-limitations)
+  - [Mini-glossary](#mini-glossary)
+  - [Where to go next](#where-to-go-next)
 
 ---
 
@@ -46,33 +65,6 @@ valve, a face/bypass damper, or any other PID-controlled loop, and it applies th
 diagnostic method. It does this by pairing a smart AI assistant with a written
 **playbook** and a set of **reliable math tools**, so the answers are consistent and
 reproducible instead of guessed.
-
----
-
-## The everyday analogy: a smart assistant with a playbook
-
-Imagine you hire a brilliant new assistant. They're clever and a fast learner, but on
-day one they don't know **your** company's specific procedures.
-
-So you give them three things:
-
-1. **A job description** — "You are a controls-diagnostics specialist who assesses PID
-   loops."
-2. **A step-by-step playbook** — "Here's exactly how we analyze this kind of data,
-   which measurements to take, and what each warning sign means."
-3. **A calculator and a set of trusted tools** — "Don't do the arithmetic in your head;
-   use these tested tools so the numbers are always right."
-
-That is *precisely* how this project is built:
-
-- The **job description** is the *agent* file.
-- The **playbook** is the *skill*.
-- The **trusted tools** are the *Python programs* (Python is just a popular programming
-  language; think of these as reliable, pre-built calculators).
-
-The AI supplies the intelligence and judgment; the playbook and tools supply the
-consistency and accuracy. Together they behave like a seasoned expert who never skips a
-step.
 
 ---
 
@@ -169,14 +161,14 @@ a story:
 1. **It reads the playbook first.** Before touching your data, it opens the skill and
    the field guide so it follows the proven procedure rather than improvising.
 
-2. **It opens the two data files.** One file is the **temperature the building actually
-   reached** over time; the other is **how hard the controller was pushing** (a number
-   from 0% = off to 100% = flat out), also over time.
+2. **It opens the two data files.** One file is the **value the process actually
+  reached** over time; the other is **how hard the controller was pushing** (a number
+  from 0% = off to 100% = flat out), also over time.
 
-3. **It reconstructs the full picture.** The data is recorded in a stingy way: a new
-   value is only saved *when something changes* (this is called **change-of-value**, or
-   COV, logging). Between saved points, the value simply stays the same. The agent
-   "fills in the gaps" so it has a continuous line to analyze instead of scattered dots.
+3. **It reconstructs the full picture.** The data uses a space-efficient format: a new
+  value is only saved *when something changes* (this is called **change-of-value**, or
+  COV, logging). Between saved points, the value simply stays the same. The agent
+  "fills in the gaps" so it has a continuous line to analyze instead of scattered dots.
    *(See [the data explained](#the-key-ideas-in-plain-language) below.)*
 
 4. **It focuses on the parts that matter.** Stretches where the controller is pinned at
@@ -498,7 +490,7 @@ we compare **what we caused** against **the agent's dominant verdict**, and tall
 it got right — a simple report card. That scoreboard is the whole point: it turns "trust
 me" into a number you can actually see.
 
-Here is the current result. Analysing the data **blind**, the agent correctly recovered
+Here is the current result. Analyzing the data **blind**, the agent correctly recovered
 **all five** planted faults as the leading signature of their stretch:
 
 | What we planted | What the agent decided (blind) | Right? |
@@ -563,7 +555,7 @@ as the **leading verdict of all five** stretches:
 | Slow over-correction | Too much integral | ✓ |
 | Outside disturbance | Disturbance | ✓ |
 
-**Score: 5 / 5.**
+**Score: 5/5.**
 
 ### 2. An outside labelled dataset — grading the timing
 
@@ -602,7 +594,7 @@ The agent doesn't just answer in the chat — it produces real, shareable files:
   what's not, how often, and what to do about it.
 - **A polished HTML report** you can open in any web browser — with color-coded tables,
   charts, and even the underlying calculations embedded so it's fully transparent.
-- **Charts** that show the temperature and the controller's effort over time, with the
+- **Charts** that show the measured value and the controller's effort over time, with the
   problem periods highlighted.
 - **Spreadsheet files (CSV)** listing every window and every episode, for anyone who
   wants to dig into the raw findings.
@@ -685,7 +677,7 @@ Good diagnostics are honest about what they *can't* prove:
 | **Saturation** | The controller pushing to a limit (fully open or closed) and still not reaching the target. |
 | **Hunting / oscillation** | The controller constantly overshooting and correcting — never settling. |
 | **Integral windup** | The controller "over-commits" while maxed out, then overshoots badly later. |
-| **Change-of-value (COV)** | A stingy way of recording data: only save a new value when it changes. |
+| **Change-of-value (COV)** | A space-efficient way of recording data: only save a new value when it changes. |
 | **Rolling window** | Analyzing a short slice of time, then sliding it forward — a moving magnifying glass. |
 | **Metric** | A single number that measures one specific feature of the data. |
 | **Fault signature** | The distinctive "fingerprint" a particular problem leaves in the data. |
