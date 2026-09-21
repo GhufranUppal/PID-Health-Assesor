@@ -1,15 +1,5 @@
 # PID Loop Health Assessor — How This Agent Works (A Plain-English Guide)
 
-*A friendly, no-jargon explanation of what this project is and how this agent reads
-control-system data and tells you whether an automatic control loop is healthy —
-whatever that loop happens to control.*
-
-This guide is written for a **non-technical reader**. You do not need to know
-programming or control theory. Every technical word is explained the first time it
-appears. If you only read one document in this project, read this one.
-
----
-
 ## Table of contents
 
 - [PID Loop Health Assessor — How This Agent Works (A Plain-English Guide)](#pid-loop-health-assessor--how-this-agent-works-a-plain-english-guide)
@@ -28,8 +18,7 @@ appears. If you only read one document in this project, read this one.
   - [The metrics, explained](#the-metrics-explained)
     - [First: the two things being measured](#first-the-two-things-being-measured)
     - [A quick word on "deadband" (ignoring the noise)](#a-quick-word-on-deadband-ignoring-the-noise)
-    - [The basic measurements (the raw "senses")](#the-basic-measurements-the-raw-senses)
-    - [The invented composite scores (fingerprints)](#the-invented-composite-scores-fingerprints)
+    - [The measurements — raw senses and composite scores](#the-measurements--raw-senses-and-composite-scores)
     - [Putting it together — how the numbers name a fault](#putting-it-together--how-the-numbers-name-a-fault)
   - [The tools the agent uses](#the-tools-the-agent-uses)
   - [How do we know it actually works? Testing with known faults](#how-do-we-know-it-actually-works-testing-with-known-faults)
@@ -57,7 +46,7 @@ Big buildings (and factories, and ships, and breweries) run on automatic control
 that hold something steady — a temperature, a pressure, a flow. Sometimes a controller
 misbehaves: it overshoots, hunts back and forth, or gets "stuck." This project is a
 **general-purpose AI assistant that reads a controller's recorded data and diagnoses
-what's wrong**, the same way an experienced technician would by eyeballing a chart —
+what's wrong**, the same way an experienced engineer would by eyeballing a chart —
 except it does it automatically, explains its reasoning, and produces a tidy report.
 
 It is **not tied to any one kind of loop.** Point it at an economizer, a chilled-water
@@ -109,7 +98,7 @@ recorded. It's like being asked "was the driver holding their speed well?" when 
 only see how the car moved — not what speed they were *aiming* for.
 
 So the agent's core skill is judging health purely from the **shape** of the wiggles in
-the data — exactly the way a veteran technician can glance at a chart and say "that's
+the data — exactly the way a veteran engineer can glance at a chart and say "that's
 overshooting" without needing the target line. This shape-based method is what makes the
 agent **general-purpose**: it works on any loop, with or without a recorded target.
 Teaching an AI to do that reliably is the clever part.
@@ -162,13 +151,13 @@ a story:
    the field guide so it follows the proven procedure rather than improvising.
 
 2. **It opens the two data files.** One file is the **value the process actually
-  reached** over time; the other is **how hard the controller was pushing** (a number
-  from 0% = off to 100% = flat out), also over time.
+   reached** over time; the other is **how hard the controller was pushing** (a number
+   from 0% = off to 100% = flat out), also over time.
 
 3. **It reconstructs the full picture.** The data uses a space-efficient format: a new
-  value is only saved *when something changes* (this is called **change-of-value**, or
-  COV, logging). Between saved points, the value simply stays the same. The agent
-  "fills in the gaps" so it has a continuous line to analyze instead of scattered dots.
+   value is only saved *when something changes* (this is called **change-of-value**, or
+   COV, logging). Between saved points, the value simply stays the same. The agent
+   "fills in the gaps" so it has a continuous line to analyze instead of scattered dots.
    *(See [the data explained](#the-key-ideas-in-plain-language) below.)*
 
 4. **It focuses on the parts that matter.** Stretches where the controller is pinned at
@@ -302,7 +291,14 @@ every micro-wiggle it would see "oscillation" everywhere. So each metric uses a
 percent for the command) *below which a wiggle is treated as zero*. Only movements bigger
 than the deadband count. This is why the agent doesn't cry wolf over sensor noise.
 
-### The basic measurements (the raw "senses")
+### The measurements — raw senses and composite scores
+
+The metrics come in two layers. First, a set of **raw measurements** — the agent's basic
+"senses," each reading one feature of the wiggles. Then a few **composite scores** that
+multiply those raw senses together to capture a specific fault's fingerprint. Both
+families are listed and then explained in depth below.
+
+**The raw measurements (the basic "senses"):**
 
 | Plain name | What it measures | A high value hints at… |
 |---|---|---|
@@ -356,10 +352,10 @@ than the deadband count. This is why the agent doesn't cry wolf over sensor nois
   pair. A command that went 45 → 55 → 48 → 52 crossed the 50% line **three** times, which
   means *both* devices were stroking at once. A plain single valve never has this metric.
 
-### The invented composite scores (fingerprints)
+**The invented composite scores (fingerprints):**
 
 Textbook metrics usually assume you have the target line to compare against. With only
-the *shape* to go on, this project combines the basic measurements above into a few new
+the *shape* to go on, this project combines the raw measurements above into a few new
 scores, each tuned to capture one fault's fingerprint:
 
 | Score | What it bundles together | It runs high when… |
@@ -657,7 +653,7 @@ Good diagnostics are honest about what they *can't* prove:
   courtroom-certain conclusion.
 - **The data is sparse.** Because values are only saved when they change, the agent has
   to reconstruct the in-between — a careful estimate, not a perfect recording.
-- **To *confirm* a diagnosis**, a technician should capture higher-detail data —
+- **To *confirm* a diagnosis**, an engineer should capture higher-detail data —
   including the target value — during a live tuning session. The agent's job is to point
   them straight to the problem so that follow-up is quick and focused.
 
